@@ -16,6 +16,10 @@ from scipy import integrate
 from Core.Utilities import *
 from Core.Definitions import *
 
+np.set_printoptions(precision=3, linewidth=100)
+import warnings
+warnings.simplefilter('error')
+
 def GetDerivative(f, dx):
     """
     This function computes the numerical derivative of a time series\n
@@ -317,7 +321,7 @@ def WriteDRMFile(filepath, filename, fTag, Disp, Vels, Accel, nt, nc, n, option)
             DRMfile.write("%E %E %E %E %E %E %E %E %E\n" % (Disp[k,0], Disp[k,1], Disp[k,2], Vels[k,0], Vels[k,1], Vels[k,2], Accel[k,0], Accel[k,1], Accel[k,2]))
     DRMfile.close()
 
-def GetKofLayer(k,p,s,h,mu,aSP):
+def GetKofLayer(k,p,s,h,mu):
     """
     This function calculates the K00 and K01 components of the stiffness matrix
     of a layer with finite thickness.\n
@@ -335,8 +339,6 @@ def GetKofLayer(k,p,s,h,mu,aSP):
         The thickness of soil layer
     mu  : float
         The shear modulus of soil
-    aSP  : float
-        The ratio between shear wave velocity and dilatational wave velocity
 
     Returns
     -------
@@ -352,6 +354,12 @@ def GetKofLayer(k,p,s,h,mu,aSP):
     b = np.imag(k*p*h)
     c = np.real(k*s*h)
     d = np.imag(k*s*h)
+    
+    # check a, c are positive numbers, otherwise changes needed to be made
+    # see Kausel-Fundamental solutions in elastodynamics, 2006, p 150
+    errinfo = r'Coefficients {} < 0, changes needed to be made for numerical statbility, see Kausel p150'
+    assert a >= 0, errinfo.format('a')
+    assert c >= 0, errinfo.format('c')
     
     cb = np.cos(b)
     sb = np.sin(b)
@@ -373,6 +381,8 @@ def GetKofLayer(k,p,s,h,mu,aSP):
     
     D0 = 2.0*(np.exp(-a-c)-C1*C2)+(1.0/p/s+p*s)*S1*S2
     
+    # print('h, a, b, c, d', h, a, b, c, d)
+    # print('k, p, s, C1, C2, S1, S2, D0', k, p, s, C1, C2, S1, S2, D0)
     K00[0,0] = (1.0-s*s)/2.0/s*(C1*S2-p*s*C2*S1)/D0
     K00[0,1] = (1.0-s*s)/2.0*(np.exp(-a-c)-C1*C2+p*s*S1*S2)/D0 + (1.0+s*s)/2.0
     K00[1,0] = K00[0,1]
@@ -447,7 +457,7 @@ def GetKofFullSpace(k,p,s,mu):
     
     return K
 
-def GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p,s,mu,aSP):
+def GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p,s,mu):
     """
     This function calculates the displacement at interior points of a layer.\n
     
@@ -470,8 +480,6 @@ def GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p,s,mu,aSP):
         The thickness of parent layer
     mu  : float
         The shear modulus of parent layer
-    aSP  : float
-        The ratio between shear wave velocity and dilatational wave velocity of parent layer
         
     Returns
     -------
@@ -480,15 +488,15 @@ def GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p,s,mu,aSP):
     """
     xi = yTop - y
     eta = y - yBot
-    [K00xi, K01xi]   = GetKofLayer(k,p,s,xi,mu,aSP) 
-    [K00eta, K01eta] = GetKofLayer(k,p,s,eta,mu,aSP) 
+    [K00xi, K01xi]   = GetKofLayer(k,p,s,xi,mu) 
+    [K00eta, K01eta] = GetKofLayer(k,p,s,eta,mu) 
     A = K00eta + K00xi*np.array([[1.0,-1.0],[-1.0,1.0]])
     b = -(np.dot(K01xi.T,uTop) + np.dot(K01eta,uBot))
     uz = np.linalg.solve(A, b)
     
     return uz
 
-def DataPreprocessing(Disp, Vels, Accel, Layers, beta, rho, nu, angle, yDRMmin, nt, dt, fun):
+def DataPreprocessing(Disp, Vels, Accel, Layers, alpha, beta, rho, nu, angle, yDRMmin, nt, dt, fun):
     """
     This function performs the data pre-processing for the wave propagation
     problem, such as adding an imaginary layer at the bottom of DRM nodes 
@@ -508,8 +516,8 @@ def DataPreprocessing(Disp, Vels, Accel, Layers, beta, rho, nu, angle, yDRMmin, 
         Displacement, Velocity, and Acceleration time series of incoming wave
     Layers  : array
         The y-coordinate of soil layer interfaces, from free ground surface to half-space surface 
-    beta, rho, nu  : array
-        Shear wave velocity, Mass density, and Poisson's ratio of soil layers, from top layer to half space 
+    alpha, beta, rho, nu  : array
+        P wave velocity, shear wave velocity, Mass density, and Poisson's ratio of soil layers, from top layer to half space 
     angle  : float
         Angle of incoming wave, with respect to vertical axis (y-axis), from 0 to 90 degrees
     yDRMmin  : float
@@ -560,9 +568,10 @@ def DataPreprocessing(Disp, Vels, Accel, Layers, beta, rho, nu, angle, yDRMmin, 
     #ADDING IMAGINARY LAYER AT yDRMmin IF NECESSARY
     if yDRMmin < Layers[-1]:
         Layers = np.append(Layers, np.array([yDRMmin]))
+        alpha = np.append(alpha, [alpha[-1]])
         beta = np.append(beta, [beta[-1]])
         rho = np.append(rho, [rho[-1]])
-        nu = np.append(nu, [nu[-1]])
+        # nu = np.append(nu, [nu[-1]])
 
     N = len(Layers)
 
@@ -592,8 +601,8 @@ def DataPreprocessing(Disp, Vels, Accel, Layers, beta, rho, nu, angle, yDRMmin, 
     sinTheta = np.sin(angle/180.0*np.pi)
     cosTheta = np.cos(angle/180.0*np.pi)
 
-    alpha = beta*np.sqrt(2.0*(1.0 - nu)/(1.0 - 2.0*nu))
-    aSP = beta/alpha
+    # alpha = beta*np.sqrt(2.0*(1.0 - nu)/(1.0 - 2.0*nu))
+    nu = ((alpha/beta)**2 - 2.) / 2. / ((alpha/beta)**2 - 1) # nu is complex considering damping
     mu = rho*beta*beta
 
     #Polarization angle for P or SV wave
@@ -623,9 +632,9 @@ def DataPreprocessing(Disp, Vels, Accel, Layers, beta, rho, nu, angle, yDRMmin, 
     afullz = FaccelIn*polarization[1]*np.exp(-1j*wVec*cosTheta/phaseVelIn*zrelHalfSpace)
     afull = np.vstack((afullx, -1j*afullz)) 
 
-    return ufull, vfull, afull, Layers, beta, rho, nu, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt
+    return ufull, vfull, afull, Layers, beta, rho, nu, wVec, p, s, h, mu, phaseVelIn, sinTheta, N, Nt
 
-def SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N):
+def SoilInterfaceResponse(ufull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N):
     """
     This function calculates the displacement time series at soil interface positions
     in wave propagation problem, in which the SV or P wave incoming from the half space
@@ -659,8 +668,6 @@ def SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N
         The thickness of soil layers
     mu  : array
         The shear modulus of soil layers
-    aSP  : array
-        The ratio between shear wave velocity and dilatational wave velocity of soil layers
     phaseVelIn  : float
         The phase velocity of incoming wave in the half space underneath
     sinTheta  : float
@@ -683,7 +690,7 @@ def SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N
 
         #Assemble each layer
         for i in range(N-1):
-            [K00, K01] = GetKofLayer(k, p[i], s[i], h[i], mu[i], aSP[i])
+            [K00, K01] = GetKofLayer(k, p[i], s[i], h[i], mu[i])
             Kglobal[2*i:2*i+2,2*i:2*i+2]     += K00
             Kglobal[2*i:2*i+2,2*i+2:2*i+4]   += K01
             Kglobal[2*i+2:2*i+4,2*i:2*i+2]   += K01.T
@@ -700,6 +707,11 @@ def SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N
     
         #Displacement at interface
         uInterface[:,:,fi] = np.linalg.solve(Kglobal, forceVec)
+        
+        # if np.isnan(np.sum(uInterface)):
+        #   print('fi\n{}, \nKglobal\n{}, \nnp.linalg.inv(Kglobal)\n{}, \nforceVec\n{}'.format(
+        #     fi, Kglobal, np.linalg.inv(Kglobal), forceVec))
+        #   break
 
     return uInterface
 
@@ -1010,7 +1022,7 @@ def GetLayerStiffnessComponents(ns,h,Lame1,mu,rho):
     
     return A0, A2, B1, B3, G0, G2, M0, M2
 
-def PSVbackground2Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt, x0, x, y):
+def PSVbackground2Dfield(us, Layers, wVec, p, s, mu, phaseVelIn, sinTheta, N, Nt, x0, x, y):
     """
     This function calculates the displacement time series in 2D wave propagation
     problem, in which the SV or P wave incoming from the half space
@@ -1041,12 +1053,8 @@ def PSVbackground2Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinThet
         Angular frequency spectrum 
     p, s  : array
         Complex coefficients
-    h  : array
-        The thickness of soil layers
     mu  : array
         The shear modulus of soil layers
-    aSP  : array
-        The ratio between shear wave velocity and dilatational wave velocity of soil layers
     phaseVelIn  : float
         The phase velocity of incoming wave in the half space underneath
     sinTheta  : float
@@ -1088,7 +1096,7 @@ def PSVbackground2Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinThet
             uTop = uInterface[2*parentLayer:2*parentLayer+2,:]
             uBot = uInterface[2*parentLayer+2:2*parentLayer+4,:]
             if y < yTop:
-                uz = GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p[parentLayer],s[parentLayer],mu[parentLayer],aSP[parentLayer])
+                uz = GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p[parentLayer],s[parentLayer],mu[parentLayer])
             elif np.isclose(y, yTop, rtol=1e-05):
                 uz = uTop
                     
@@ -1159,7 +1167,7 @@ def RHbackground2Dfield(FdispIn,wVec,interpDispersion,interpuMmodeShape,interpvM
     
     return Z
 
-def PSVbackground3Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sinTheta, N, Nt, x0, x1, x2, x3):
+def PSVbackground3Dfield(us, Layers, wVec, p, s, mu, phaseVelIn, di, sinTheta, N, Nt, x0, x1, x2, x3):
     """
     This function calculates the displacement time series in 3D wave propagation
     problem, in which the SV or P wave incoming from the half space
@@ -1191,12 +1199,8 @@ def PSVbackground3Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sin
         Angular frequency spectrum 
     p, s  : array
         Complex coefficients
-    h  : array
-        The thickness of soil layers
     mu  : array
         The shear modulus of soil layers
-    aSP  : array
-        The ratio between shear wave velocity and dilatational wave velocity of soil layers
     phaseVelIn  : float
         The phase velocity of incoming wave in the half space underneath
     di  : array
@@ -1243,7 +1247,7 @@ def PSVbackground3Dfield(us, Layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sin
             uTop = uInterface[2*parentLayer:2*parentLayer+2,:]
             uBot = uInterface[2*parentLayer+2:2*parentLayer+4,:]
             if y < yTop:
-                uz = GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p[parentLayer],s[parentLayer],mu[parentLayer],aSP[parentLayer])
+                uz = GetDisplacementAtInteriorLayer(y,yTop,yBot,uTop,uBot,k,p[parentLayer],s[parentLayer],mu[parentLayer])
             elif np.isclose(y, yTop, rtol=1e-06):
                 uz = uTop
                     
@@ -1403,14 +1407,24 @@ def GenerateDRMFiles():
 
                 #Layer material information
                 nmat = len(Entities['Functions'][fTag]['attributes']['material'])
-                beta = np.zeros((nmat,))
+                alpha = np.zeros((nmat,), dtype=complex)
+                beta = np.zeros((nmat,), dtype=complex)
                 rho = np.zeros((nmat,))
                 nu = np.zeros((nmat,))
+                mattags = np.zeros((nmat,))
                 for k, mTag in enumerate(Entities['Functions'][fTag]['attributes']['material']):
                     material = Entities['Materials'][mTag]['attributes']
-                    beta[k] = np.sqrt(material['E']/2.0/material['rho']/(1.0 + material['nu']))
+                    
+                    vsi = np.sqrt(material['E']/2.0/material['rho']/(1.0 + material['nu']))
+                    beta[k] = vsi * (1+1j*material['xis'])
+                    alpha[k] = vsi * np.sqrt((2.-2.*material['nu'])/(1-2*material['nu'])) * (1+1j*material['xip'])
+                    
                     rho[k] = material['rho']
                     nu[k] = material['nu']
+                    mattags[k] = mTag
+                    
+                # print soil layer info
+                print('Material info [matTag, vp, vs, rho, nu]:\n', np.c_[mattags, alpha, beta, rho, nu])
 
                 nt = len(t)
                 
@@ -1431,20 +1445,20 @@ def GenerateDRMFiles():
                         df = fun['df']
                         CutOffFrequency = fun['CutOffFrequency']
 
-                        ufull, vfull, afull, layers, beta, rho, nu, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt = DataPreprocessing(Disp, Vels, Accel, layers, beta, rho, nu, angle, xmin[1], nt, dt, fun)
+                        ufull, vfull, afull, layers, beta, rho, nu, wVec, p, s, h, mu, phaseVelIn, sinTheta, N, Nt = DataPreprocessing(Disp, Vels, Accel, layers, alpha, beta, rho, nu, angle, xmin[1], nt, dt, fun)
 
                         #Compute Interface responses
-                        uInterface = SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
-                        vInterface = SoilInterfaceResponse(vfull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
-                        aInterface = SoilInterfaceResponse(afull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
+                        uInterface = SoilInterfaceResponse(ufull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
+                        vInterface = SoilInterfaceResponse(vfull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
+                        aInterface = SoilInterfaceResponse(afull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
 
                         x0 = xmin[0]
                         with concurrent.futures.ProcessPoolExecutor() as executor:
                             for k, n in enumerate(nodes):
                                 x = Entities['Nodes'][n]['coords']
-                                U = PSVbackground2Dfield(uInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
-                                V = PSVbackground2Dfield(vInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
-                                A = PSVbackground2Dfield(aInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
+                                U = PSVbackground2Dfield(uInterface, layers, wVec, p, s, mu, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
+                                V = PSVbackground2Dfield(vInterface, layers, wVec, p, s, mu, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
+                                A = PSVbackground2Dfield(aInterface, layers, wVec, p, s, mu, phaseVelIn, sinTheta, N, Nt, x0, x[0], x[1])
                                 executor.submit(WriteDRMFile, dirName, funName, fTag, U, V, A, nt, 6, n, conditions[k])
                     elif waveType == 'RH':
                         #Unpack Layer information
@@ -1512,22 +1526,24 @@ def GenerateDRMFiles():
                         angle = fun['theta']
                         layers = fun['layer']
                         df = fun['df']
-                        CutOffFrequency = fun['CutOffFrequency']
+                        # CutOffFrequency = fun['CutOffFrequency']
 
-                        ufull, vfull, afull, layers, beta, rho, nu, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N, Nt = DataPreprocessing(Disp, Vels, Accel, layers, beta, rho, nu, angle, xmin[2], nt, dt, fun)
+                        ufull, vfull, afull, layers, beta, rho, nu, wVec, p, s, h, mu, phaseVelIn, sinTheta, N, Nt = DataPreprocessing(Disp, Vels, Accel, layers, alpha, beta, rho, nu, angle, xmin[2], nt, dt, fun)
+                        
+                        # print('beta, phaseVelIn', beta, phaseVelIn)
 
                         #Compute Interface responses
-                        uInterface = SoilInterfaceResponse(ufull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
-                        vInterface = SoilInterfaceResponse(vfull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
-                        aInterface = SoilInterfaceResponse(afull, wVec, p, s, h, mu, aSP, phaseVelIn, sinTheta, N)
+                        uInterface = SoilInterfaceResponse(ufull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
+                        vInterface = SoilInterfaceResponse(vfull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
+                        aInterface = SoilInterfaceResponse(afull, wVec, p, s, h, mu, phaseVelIn, sinTheta, N)
 
-                        x0 = xmin[0]*di[0] + xmin[0]*di[1]
+                        x0 = xmin[0]*di[0] + xmin[1]*di[1]
                         with concurrent.futures.ProcessPoolExecutor() as executor:
                             for k, n in enumerate(nodes):
                                 x = Entities['Nodes'][n]['coords']  
-                                U = PSVbackground3Dfield(uInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
-                                V = PSVbackground3Dfield(vInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
-                                A = PSVbackground3Dfield(aInterface, layers, wVec, p, s, h, mu, aSP, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
+                                U = PSVbackground3Dfield(uInterface, layers, wVec, p, s, mu, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
+                                V = PSVbackground3Dfield(vInterface, layers, wVec, p, s, mu, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
+                                A = PSVbackground3Dfield(aInterface, layers, wVec, p, s, mu, phaseVelIn, di, sinTheta, N, Nt, x0, x[0], x[1], x[2])
                                 executor.submit(WriteDRMFile, dirName, funName, fTag, U, V, A, nt, 9, n, conditions[k])
                     elif waveType == 'SH':
                         #TODO: Complete SH case in 3D

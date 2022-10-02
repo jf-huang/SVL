@@ -655,6 +655,20 @@ def checkWarnings():
                             xmin[k] = Entities['Nodes'][nTags[k]]['coords']
                         Entities['Functions'][fTag]['attributes']['xmin'] = xmin.min(axis=0)
 
+                        # get the remote and topmost crds and node tags (corresponding to xmin above)
+                        xbot = xmin.min(axis=0)
+                        xtop = np.array([xmin[:,0].min(), xmin[:,1].min(), xmin[:,2].max()])
+                        for k in range(nNode):
+                          if np.allclose(xbot, xmin[k,:]):
+                            nodetag_xbot = nTags[k]
+                            break
+                        for k in range(nNode):
+                          if np.allclose(xtop, xmin[k,:]):
+                            nodetag_xtop = nTags[k]
+                            break
+                        print('Top node {} crd: {}'.format(nodetag_xtop, xtop))
+                        print('Bottom node {} crd: {}'.format(nodetag_xbot, xbot))
+
                         undefined = allTag.difference(nTags)
                         if undefined:
                             print(' |   *** ELEMENTLOAD (%s) in file=\'%s\' not all DRM nodes have been specified' % (LOAD,filename))

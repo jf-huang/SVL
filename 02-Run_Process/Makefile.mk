@@ -6,7 +6,7 @@ MPICC := mpic++
 #LIBRARIES USED TO BE INCLUDED IN COMPILATION.
 EIGEN_DIR = /usr/include/eigen
 PETSC_DIR = /usr/lib/petsc
-MPI_DIR   = /usr/include/mpi
+MPI_DIR   = /usr/include/x86_64-linux-gnu/mpi
 
 #INCLUDE PETSC VARIABLES.
 include ${PETSC_DIR}/lib/petsc/conf/variables
