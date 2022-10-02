@@ -1,0 +1,83 @@
+Bootstrap: docker
+From: ubuntu:20.04
+
+%files
+  ../SVL /home/SVL
+
+%post
+  # SVL path and build date
+  # echo "DEBIAN_FRONTEND=noninteractive"
+  # echo "export svlpath="/home/SVL"" >> $SINGULARITY_ENVIRONMENT
+  # NOW=`date`
+  # echo "export NOW=\"${NOW}\"" >> $SINGULARITY_ENVIRONMENT
+  export svlpath="/home/SVL"
+  echo 'set completion-ignore-case On' >> /etc/inputrc
+
+  # set timezone to avoid interaction in the command line that halts the build
+  TZ=Etc/UTC && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
+
+  # dependencies
+  apt-get update && apt-get install --no-install-recommends -y \
+  locales \
+  wget \
+  bash \
+  vim \
+  gcc \
+  gfortran \
+  g++ \
+  make \
+  python3.9 \
+  python3-pip \
+  python3-matplotlib \
+  libomp-dev \
+  openmpi-bin \
+  openmpi-common \
+  libopenmpi-dev \
+  metis \
+  libmetis-dev \
+  libparmetis-dev \
+  libscotch-dev \
+  libptscotch-dev \
+  libatlas-base-dev \
+  liblapack-dev \
+  libscalapack-openmpi-dev \
+  libmumps-5.2.1 \
+  petsc-dev
+
+  pip3 install ipython numpy==1.23.3 scipy
+
+  # set locales to avoid 
+  locale-gen en_US.UTF-8
+
+  # settings for vim
+  echo $'set number \ncolorscheme desert' >> ~/.vimrc
+
+  # Download and Install Eigen C++ library
+  wget -nv https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.tar.gz
+  tar -xvf eigen-3.3.9.tar.gz
+  mv eigen-3.3.9 eigen
+  mv eigen /usr/include
+  rm eigen-3.3.9.tar.gz
+
+  # Move metis library to Pre-Analysis folder
+  cp /usr/bin/mpmetis ${svlpath}/01-Pre_Process/Metis
+
+  # Compile the SVL library
+  cd ${svlpath}/02-Run_Process
+  make clean && make -s DEBUG=False
+  mv SeismoVLAB.exe svl
+
+%environment
+  export PYTHONPATH="$PYTHONPATH:/home/SVL/01-Pre_Process"
+  export PATH="$PATH:/home/SVL/02-Run_Process"
+
+
+%labels
+  Author jfhuang19@gmail.com
+  # Build-date ${NOW}
+
+%help
+  # SeismoVLAB files are here: ${svlpath}
+
